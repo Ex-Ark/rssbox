@@ -139,7 +139,7 @@ class String
     if %r{^https?://www\.facebook\.com/.*/videos/(?:vb\.\d+\/)?(?<id>\d+)} =~ self || %r{^https?://www\.facebook\.com/video/embed\?video_id=(?<id>\d+)} =~ self
       <<~EOF
         <iframe width="1280" height="720" src="https://www.facebook.com/video/embed?video_id=#{id}" frameborder="0" scrolling="no" allowfullscreen referrerpolicy="no-referrer"></iframe>
-        <a href="https://www.facebook.com/video/embed?video_id=#{id}" rel="noreferrer">Open embed</a> | <a href="#{root_url}/facebook/download?url=#{id}">Download video</a> | <a href="#{root_url}/#{Addressable::URI.new(query: "download=https://www.facebook.com/video/embed?video_id=#{id}").normalize.to_s}">Download video with nice filename</a>
+        <a href="https://www.facebook.com/video/embed?video_id=#{id}" rel="noreferrer">Open embed</a>
       EOF
     elsif %r{^https?://(?:www\.|m\.)youtube\.com/(?:.*?[?&#](v=(?<id>[^&#]+)|list=(?<list>[^&#]+)|(?:t|time_continue)=(?<t>[^&#]+)))+} =~ self || %r{^https?://(?:youtu\.be|(?:www\.)?youtube\.com/embed)/(?<id>[^?&#]+)(?:.*?[?&#](list=(?<list>[^&#]+)|(?:t|time_continue)=(?<t>[^&#]+)))*} =~ self
       # https://www.youtube.com/watch?v=z5OGD5_9cA0&list=PL0QrZvg7QIgpoLdNFnEePRrU-YJfr9Be7&index=3&t=30s
@@ -155,7 +155,7 @@ class String
       "<iframe width='640' height='360' src='#{url}' frameborder='0' scrolling='no' allowfullscreen referrerpolicy='no-referrer'></iframe>"
     elsif %r{^https?://(?:www\.)?vimeo\.com/(?<id>\d+)} =~ self
       "<iframe width='853' height='480' src='https://player.vimeo.com/video/#{id}' frameborder='0' scrolling='no' allowfullscreen referrerpolicy='no-referrer'></iframe>"
-    elsif %r{^https?://(?:www\.)?instagram\.com/p/(?<id>[^/?#]+)} =~ self
+    elsif %r{^https?://(?:www\.)?instagram\.com/(?:p|tv)/(?<id>[^/?#]+)} =~ self
       "<iframe width='612' height='710' src='https://www.instagram.com/p/#{id}/embed/' frameborder='0' scrolling='no' allowfullscreen referrerpolicy='no-referrer'></iframe>"
     elsif %r{^https?://(?:www\.)?twitch\.tv/(?:videos/(?<vod_id>\d+)|(?<channel_name>[^/]+)(?:/(?:v|video)/(?<vod_id>\d+))?).*?(?:[?&#](?:t|time)=(?<t>[^&#]+))?} =~ self && !%w[directory broadcast].include?(channel_name)
       # https://www.twitch.tv/videos/76877760?t=20h38m50s

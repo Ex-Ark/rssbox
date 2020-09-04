@@ -35,7 +35,7 @@ get "/" do
 end
 
 get "/live" do
-  return [404, "Disabled since this experiment is no longer maintained."]
+  return [410, "Disabled since this experiment is no longer maintained."]
   content_type :html
   SecureHeaders.use_secure_headers_override(request, :live)
   send_file File.join(settings.views, "live.html")
@@ -56,6 +56,8 @@ end
 
 # This route is useful together with this bookmarklet:
 # javascript:location='https://rssbox.herokuapp.com/go?q='+encodeURIComponent(location.href);
+# Or for Firefox:
+# javascript:location='https://rssbox.herokuapp.com/?go='+encodeURIComponent(location.href);
 get "/go" do
   return [400, "Insufficient parameters"] if params[:q].empty?
 
@@ -63,8 +65,6 @@ get "/go" do
     redirect Addressable::URI.new(path: "/twitter", query_values: params).normalize.to_s
   elsif /^https?:\/\/(?:www\.|gaming\.)?youtu(?:\.be|be\.com)/ =~ params[:q]
     redirect Addressable::URI.new(path: "/youtube", query_values: params).normalize.to_s
-  elsif /^https?:\/\/(?:www\.)?facebook\.com/ =~ params[:q]
-    redirect Addressable::URI.new(path: "/facebook", query_values: params).normalize.to_s
   elsif /^https?:\/\/(?:www\.)?instagram\.com/ =~ params[:q]
     redirect Addressable::URI.new(path: "/instagram", query_values: params).normalize.to_s
   elsif /^https?:\/\/(?:www\.)?(?:periscope|pscp)\.tv/ =~ params[:q]
@@ -89,7 +89,11 @@ get "/go" do
     redirect Addressable::URI.parse("https://medium.com/feed/#{user}").normalize.to_s
   elsif /^https?:\/\/(?<name>[a-z0-9\-]+)\.blogspot\./ =~ params[:q]
     redirect Addressable::URI.parse("https://#{name}.blogspot.com/feeds/posts/default").normalize.to_s
-  elsif /^https?:\/\/groups\.google\.com\/forum\/#!(?:[a-z]+)\/(?<name>[^\/?&#]+)/ =~ params[:q]
+  elsif /^https?:\/\/groups\.google\.com\/(?:forum\/[^#]*#!(?:[a-z]+)|g)\/(?<name>[^\/?&#]+)/ =~ params[:q]
+    # https://groups.google.com/forum/?oldui=1#!forum/rabbitmq-users
+    # https://groups.google.com/forum/?oldui=1#!topic/rabbitmq-users/9D4BAuud6PU
+    # https://groups.google.com/g/rabbitmq-users
+    # https://groups.google.com/g/rabbitmq-users/c/9D4BAuud6PU
     redirect Addressable::URI.parse("https://groups.google.com/forum/feed/#{name}/msgs/atom.xml?num=50").normalize.to_s
   elsif /^https?:\/\/www\.deviantart\.com\/(?<user>[^\/]+)/ =~ params[:q]
     redirect "https://backend.deviantart.com/rss.xml" + Addressable::URI.new(query: "type=deviation&q=by:#{user} sort:time").normalize.to_s
@@ -362,7 +366,7 @@ get "/youtube/:channel_id/:username" do
 end
 
 get %r{/googleplus/(?<id>\d+)/(?<username>.+)} do |id, username|
-  return [404, "RIP Google+ 2011-2019"]
+  return [410, "RIP Google+ 2011-2019"]
 end
 
 get "/vimeo" do
@@ -396,160 +400,16 @@ get "/vimeo" do
   end
 end
 
-get "/facebook" do
-  return [404, "Credentials not configured"] if !ENV["FACEBOOK_APP_ID"] || !ENV["FACEBOOK_APP_SECRET"]
-  return [400, "Insufficient parameters"] if params[:q].empty?
-
-  params[:q].gsub!("facebookcorewwwi.onion", "facebook.com") if params[:q].include?("facebookcorewwwi.onion")
-
-  if /https:\/\/www\.facebook\.com\/plugins\/.+[?&]href=(?<href>.+)$/ =~ params[:q]
-    # https://www.facebook.com/plugins/video.php?href=https%3A%2F%2Fwww.facebook.com%2Finfectedmushroom%2Fvideos%2F10154638763917261%2F&show_text=0&width=400
-    params[:q] = CGI.unescape(href)
-  end
-
-  if /facebook\.com\/pages\/[^\/]+\/(?<id>\d+)/ =~ params[:q]
-    # https://www.facebook.com/pages/Lule%C3%A5-Sweden/106412259396611?fref=ts
-  elsif /facebook\.com\/groups\/(?<id>\d+)/ =~ params[:q]
-    # https://www.facebook.com/groups/223764997793315
-  elsif /facebook\.com\/video\/[^\d]+(?<id>\d+)/ =~ params[:q]
-    # https://www.facebook.com/video/embed?video_id=1192228974143110
-  elsif /facebook\.com\/[^\/]+-(?<id>[\d]+)/ =~ params[:q]
-    # https://www.facebook.com/TNG-Recuts-867357396651373/
-  elsif /facebook\.com\/(?:pg\/)?(?<id>[^\/?#]+)/ =~ params[:q]
-    # https://www.facebook.com/celldweller/info?tab=overview
-  else
-    id = params[:q]
-  end
-
-  response = Facebook.get("/", query: { id: id, metadata: "1" })
-  return [response.code, "Can't find a page with that name. Sorry."] if response.code == 404
-  return [response.code, "#{Facebook::BASE_URL}/#{id} returned code #{response.code}."] if response.code == 400
-  raise(FacebookError, response) if !response.success?
-  data = response.json
-  if data["metadata"]["fields"].any? { |field| field["name"] == "from" }
-    # this is needed if the url is for e.g. a photo and not the main page
-    response = Facebook.get("/", query: { id: id, fields: "from", metadata: "1" })
-    raise(FacebookError, response) if !response.success?
-    id = response.json["from"]["id"]
-    response = Facebook.get("/", query: { id: id, metadata: "1" })
-    raise(FacebookError, response) if !response.success?
-    data = response.json
-  end
-  if data["metadata"]["fields"].any? { |field| field["name"] == "username" }
-    response = Facebook.get("/", query: { id: id, fields: "username,name" })
-    raise(FacebookError, response) if !response.success?
-    data = response.json
-  end
-
-  return [404, "Please use a link directly to the Facebook page."] if !data["id"].numeric?
-  redirect Addressable::URI.new(path: "/facebook/#{data["id"]}/#{data["username"] || data["name"]}", query_values: params.slice(:type)).normalize.to_s
-end
-
-get "/facebook/download" do
-  return [404, "Credentials not configured"] if !ENV["FACEBOOK_APP_ID"] || !ENV["FACEBOOK_APP_SECRET"]
-
-  if /\/(?<id>\d+)/ =~ params[:url]
-    # https://www.facebook.com/infectedmushroom/videos/10153430677732261/
-    # https://www.facebook.com/infectedmushroom/videos/vb.8811047260/10153371214897261/?type=2&theater
-  elsif /\d+_(?<id>\d+)/ =~ params[:url]
-  elsif /v=(?<id>\d+)/ =~ params[:url]
-  elsif /(?<id>\d+)/ =~ params[:url]
-  else
-    id = params[:url]
-  end
-
-  response = HTTP.get("https://www.facebook.com/#{id}")
-  response = HTTP.get(response.redirect_url) if response.redirect_same_origin?
-  if response.success?
-    if /hd_src(?:_no_ratelimit)?:"(?<url>[^"]+)"/ =~ response.body
-    elsif /https:\/\/[^"]+_#{id}_[^"]+\.jpg[^"]+/o =~ response.body
-      # This is not the best quality of the picture, but it will have to do
-      url = CGI.unescapeHTML($&)
-    end
-    if !url
-      return [404, "Video/photo not found."]
-    end
-    if env["HTTP_ACCEPT"] == "application/json"
-      content_type :json
-      fn = nil
-      if /<title[^>]*>(?<title>[^<]+)<\/title>/ =~ response.body && /data-utime="(?<utime>\d+)"/ =~ response.body
-        title = title.force_encoding("UTF-8").gsub(" | Facebook", "")
-        created_time = Time.at(utime.to_i)
-        fn = "#{created_time.to_date} - #{title}.#{url.url_ext}".to_filename
-      end
-      return {
-        url: url,
-        filename: fn,
-      }.to_json
-    end
-    redirect url
-  end
-end
-
 get %r{/facebook/(?<id>\d+)/(?<username>.+)} do |id, username|
-  return [404, "Credentials not configured"] if !ENV["FACEBOOK_APP_ID"] || !ENV["FACEBOOK_APP_SECRET"]
-
-  @id = id
-  @type = @edge = %w[videos photos live].pick(params[:type]) || "posts"
-  @edge = "videos" if @type == "live"
-  fields = {
-    "posts"  => "updated_time,from,parent_id,type,story,name,message,description,link,source,picture,full_picture,properties",
-    "videos" => "updated_time,from,title,description,embed_html,length,live_status",
-    "photos" => "updated_time,from,message,description,name,link,source",
-  }[@edge]
-
-  query = { fields: fields, since: Time.now.to_i-365*24*60*60 } # date -v -1w +%s
-
-  if params.has_key?(:locale)
-    query[:locale] = params[:locale]
-  end
-
-  response = Facebook.get("/#{id}/#{@edge}", query: query)
-  return [response.code, "#{Facebook::BASE_URL}/#{id}/#{@edge} returned code #{response.code}."] if response.code == 400
-  raise(FacebookError, response) if !response.success?
-
-  @data = response.json["data"]
-  if @edge == "posts"
-    # Copy down video length from properties array
-    @data.each do |post|
-      if post.has_key?("properties")
-        post["properties"].each do |prop|
-          if prop["name"] == "Length" && /^(?<m>\d+):(?<s>\d+)$/ =~ prop["text"]
-            post["length"] = 60*m.to_i + s.to_i
-          end
-        end
-      end
-    end
-  elsif @type == "live"
-    @data.select! { |post| post["live_status"] }
-  end
-
-  # Remove live videos from most feeds
-  if @type != "live"
-    @data.select! { |post| post["live_status"] != "LIVE" }
-  end
-
-  @user = @data[0]["from"]["name"] rescue CGI.unescape(username)
-  @title = @user
-  if @type == "live"
-    @title += "'s live videos"
-  elsif @type != "posts"
-    @title += "'s #{@type}"
-  end
-  @title += " on Facebook"
-
-  @data.map do |post|
-    post.slice("message", "description", "link").values.map(&:grep_urls)
-  end.flatten.tap { |urls| URL.resolve(urls) }
-
-  erb :"facebook.atom"
+  return [410, "Facebook functionality has been removed since I do not have API access. Maybe we can rebuild it some day, but using scraping techniques or something."]
 end
 
 get "/instagram" do
   return [400, "Insufficient parameters"] if params[:q].empty?
 
-  if /instagram\.com\/p\/(?<post_id>[^\/?#]+)/ =~ params[:q]
-    # https://www.instagram.com/p/4KaPsKSjni/
+  if /instagram\.com\/(?:p|tv)\/(?<post_id>[^\/?#]+)/ =~ params[:q]
+    # https://www.instagram.com/p/B-Pv6COFOjV/
+    # https://www.instagram.com/tv/B-Pv6COFOjV/
     response = Instagram.get("/p/#{post_id}/")
     return [response.code, "This post does not exist or is a private post."] if response.code == 404
     raise(InstagramError, response) if !response.success?
@@ -575,15 +435,16 @@ get "/instagram" do
   end
 
   if user
-    redirect Addressable::URI.new(path: "/instagram/#{user["id"] || user["pk"]}/#{user["username"]}", query_values: params.slice(:type)).normalize.to_s
+    redirect Addressable::URI.new(path: "/instagram/#{user["id"] || user["pk"]}/#{user["username"]}").normalize.to_s
   else
     return [404, "Can't find a user with that name. Sorry."]
   end
 end
 
 get "/instagram/download" do
-  if /instagram\.com\/p\/(?<post_id>[^\/?#]+)/ =~ params[:url]
-    # https://www.instagram.com/p/4KaPsKSjni/
+  if /instagram\.com\/(?:p|tv)\/(?<post_id>[^\/?#]+)/ =~ params[:url]
+    # https://www.instagram.com/p/B-Pv6COFOjV/
+    # https://www.instagram.com/tv/B-Pv6COFOjV/
   else
     post_id = params[:url]
   end
@@ -633,15 +494,7 @@ get %r{/instagram/(?<user_id>\d+)/(?<username>.+)} do |user_id, username|
     query: { query_hash: "f045d723b6f7f8cc299d62b57abd500a", variables: "{\"id\":\"#{@user_id}\",\"first\":12}"},
   }
   if params[:sessionid]
-    # To subscribe to private feeds, follow these steps in bash:
-    # ua="Mozilla/5.0 (Windows NT 6.1; WOW64; rv:68.0) Gecko/20100101 Firefox/68.0"
-    # u=your_username
-    # p=your_password
-    # your_friends_username=your_friends_username
-    # your_friends_userid=$(curl -s "https://www.instagram.com/$your_friends_username/" -A "$ua" | grep -oE '"id":"([0-9]+)"' | head -1 | cut -d'"' -f4)
-    # csrftoken=$(curl -sI https://www.instagram.com/ -A "$ua" | grep -i 'set-cookie: csrftoken=' | cut -d';' -f1 | cut -d= -f2)
-    # sessionid=$(curl -sv https://www.instagram.com/accounts/login/ajax/ -A "$ua" -H 'referer: https://www.instagram.com/accounts/login/' -b "csrftoken=$csrftoken" -H "x-csrftoken: $csrftoken" --data "username=$u&password=$p" 2>&1 | grep -i 'set-cookie: sessionid=' | cut -d';' -f1 | cut -d= -f2)
-    # echo "https://rssbox.herokuapp.com/instagram/$your_friends_userid/$your_friends_username?sessionid=$sessionid"
+    # To subscribe to private feeds, see https://github.com/stefansundin/rssbox/issues/21#issuecomment-525130553
     # Please host the app yourself if you decide to do this, otherwise you will leak your sessionid to me and the privacy of your friends posts.
     options[:headers] = {"Cookie" => "ig_cb=1; sessionid=#{CGI.escape(params[:sessionid])}"}
   end
@@ -730,20 +583,13 @@ get %r{/periscope/(?<id>[^/]+)/(?<username>.+)} do |id, username|
 end
 
 get %r{/periscope_img/(?<broadcast_id>[^/]+)} do |id|
-  # The image url expires after 24 hours, so to avoid it being cached by the RSS client and then expire, we just proxy it on demand
+  # The image URL expires after 24 hours, so to avoid the URL from being cached by the RSS client and then expire, we just redirect on demand
   # Interestingly enough, if a request is made before the token expires, it will be cached by their CDN and continue to work even after the token expires
-  # Can't just redirect either since it looks at the referer header, and most web based RSS clients will send that
-  # For whatever reason, the accessVideoPublic endpoint doesn't require a session_id
   response = Periscope.get("/accessVideoPublic", query: { broadcast_id: id })
   cache_control :public, :max_age => 31556926 # cache a long time
   return [response.code, "Image not found."] if response.code == 404
   raise(PeriscopeError, response) if !response.success?
-  if response.json["broadcast"]["image_url"].empty?
-    return [404, "Image not found."]
-  end
-  response = HTTP.get(response.json["broadcast"]["image_url"])
-  content_type response.headers["content-type"][0]
-  response.body
+  redirect response.json["broadcast"]["image_url"]
 end
 
 get "/soundcloud" do
@@ -870,20 +716,20 @@ get "/twitch" do
     raise(TwitchError, response) if !response.success?
     data = response.json["data"][0]
     return [404, "Can't find a game with that name."] if data.nil?
-    redirect Addressable::URI.new(path: "/twitch/directory/game/#{data["id"]}/#{game_name}", query_values: params.slice(:type)).normalize.to_s
+    redirect Addressable::URI.new(path: "/twitch/directory/game/#{data["id"]}/#{game_name}").normalize.to_s
   elsif vod_id
     response = Twitch.get("/videos", query: { id: vod_id })
     return [response.code, "Video does not exist."] if response.code == 404
     raise(TwitchError, response) if !response.success?
     data = response.json["data"][0]
-    redirect Addressable::URI.new(path: "/twitch/#{data["user_id"]}/#{data["user_name"]}", query_values: params.slice(:type)).normalize.to_s
+    redirect Addressable::URI.new(path: "/twitch/#{data["user_id"]}/#{data["user_name"]}").normalize.to_s
   else
     response = Twitch.get("/users", query: { login: username })
     return [response.code, "The username contains invalid characters."] if response.code == 400
     raise(TwitchError, response) if !response.success?
     data = response.json["data"][0]
     return [404, "Can't find a user with that name. Sorry."] if data.nil?
-    redirect Addressable::URI.new(path: "/twitch/#{data["id"]}/#{data["display_name"]}", query_values: params.slice(:type)).normalize.to_s
+    redirect Addressable::URI.new(path: "/twitch/#{data["id"]}/#{data["display_name"]}").normalize.to_s
   end
 end
 
@@ -1129,9 +975,9 @@ get "/ustream" do
     "http://www.ustream.tv/#{params[:q]}"
   end
   begin
-    doc = Nokogiri::HTML(open(url))
+    doc = Nokogiri::HTML(URI.open(url))
     channel_id = doc.at("meta[name='ustream:channel_id']")["content"].to_i
-    doc = Nokogiri::HTML(open("http://www.ustream.tv/channel/#{channel_id}"))
+    doc = Nokogiri::HTML(URI.open("http://www.ustream.tv/channel/#{channel_id}"))
     channel_title = doc.at("meta[property='og:title']")["content"]
   rescue
     return [404, "Could not find the channel."]
@@ -1271,7 +1117,7 @@ get "/imgur" do
   if user_id.nil?
     return [404, "This image was probably uploaded anonymously. Sorry."]
   else
-    redirect Addressable::URI.new(path: "/imgur/#{user_id}/#{username}", query_values: params.slice(:type)).normalize.to_s
+    redirect Addressable::URI.new(path: "/imgur/#{user_id}/#{username}").normalize.to_s
   end
 end
 
